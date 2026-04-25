@@ -1,0 +1,6 @@
+flask>=2.3.0
+flask-cors>=4.0.0
+requests>=2.31.0
+pyhiveapi>=0.5.3
+python-kasa>=0.6.2
+zeroconf>=0.131.0

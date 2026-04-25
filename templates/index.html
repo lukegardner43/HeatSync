@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HeatSync</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & Variables ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0c0c0e;
+      --surface:   #141416;
+      --surface2:  #1c1c1f;
+      --border:    #2a2a2e;
+      --text:      #e8e8ec;
+      --muted:     #6b6b72;
+      --amber:     #f59e0b;
+      --amber-dim: #92610a;
+      --amber-glow:#f59e0b44;
+      --red:       #ef4444;
+      --blue:      #60a5fa;
+      --green:     #34d399;
+      --font-ui:   'Syne', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* Subtle noise texture overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.4;
+    }
+
+    * { position: relative; z-index: 1; }
+
+    /* ── Layout ── */
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: var(--amber);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .logo h1 {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: var(--text);
+    }
+
+    .logo span {
+      color: var(--muted);
+      font-weight: 400;
+      font-size: 13px;
+      display: block;
+      margin-top: -3px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .poll-badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface2);
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+    }
+
+    .poll-badge span { color: var(--green); }
+
+    /* ── Buttons ── */
+    .btn {
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.15s;
+      background: var(--surface2);
+      color: var(--text);
+    }
+    .btn:hover { border-color: var(--amber); color: var(--amber); }
+    .btn.primary { background: var(--amber); color: #000; border-color: var(--amber); }
+    .btn.primary:hover { background: #fbbf24; }
+    .btn.danger { border-color: var(--red); color: var(--red); }
+    .btn.danger:hover { background: #ef444422; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Main Content ── */
+    main {
+      padding: 28px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* ── Status Bar (top row) ── */
+    .status-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .stat-card.boiler-on {
+      border-color: var(--amber);
+      box-shadow: 0 0 32px var(--amber-glow);
+      animation: boiler-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes boiler-pulse {
+      0%, 100% { box-shadow: 0 0 24px var(--amber-glow); }
+      50%       { box-shadow: 0 0 48px #f59e0b66; }
+    }
+
+    .stat-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .stat-value {
+      font-family: var(--font-mono);
+      font-size: 32px;
+      font-weight: 500;
+      line-height: 1;
+      color: var(--text);
+    }
+
+    .stat-value.amber { color: var(--amber); }
+    .stat-value.blue  { color: var(--blue); }
+    .stat-value.green { color: var(--green); }
+
+    .stat-sub {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      background: var(--muted);
+    }
+    .status-dot.active  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-dot.heating { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: blink 1.2s ease-in-out infinite; }
+    .status-dot.error   { background: var(--red); }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+
+    /* ── Section Header ── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* ── Valve Grid ── */
+    .valve-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .valve-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: border-color 0.2s;
+    }
+
+    .valve-card.heating {
+      border-color: var(--amber-dim);
+      background: linear-gradient(135deg, #141416, #1a160a);
+    }
+
+    .valve-card.offline {
+      opacity: 0.5;
+    }
+
+    .valve-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+
+    .valve-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.3;
+    }
+
+    .valve-ip {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .heating-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: var(--amber-glow);
+      color: var(--amber);
+      border: 1px solid var(--amber-dim);
+      flex-shrink: 0;
+    }
+
+    /* Temperature ring */
+    .temp-ring-wrap {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .temp-ring {
+      position: relative;
+      width: 64px;
+      height: 64px;
+      flex-shrink: 0;
+    }
+
+    .temp-ring svg {
+      transform: rotate(-90deg);
+      width: 64px;
+      height: 64px;
+    }
+
+    .temp-ring .ring-bg { fill: none; stroke: var(--surface2); stroke-width: 5; }
+    .temp-ring .ring-fill { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
+    .ring-fill.cold { stroke: var(--blue); }
+    .ring-fill.warm { stroke: var(--amber); }
+
+    .temp-ring-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .temp-current {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1;
+    }
+
+    .temp-unit {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--muted);
+    }
+
+    .temp-info { flex: 1; }
+
+    .temp-label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .temp-target {
+      font-family: var(--font-mono);
+      font-size: 22px;
+      font-weight: 500;
+      line-height: 1;
+    }
+
+    /* Temperature stepper */
+    .temp-stepper {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stepper-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.12s;
+      line-height: 1;
+      font-family: var(--font-mono);
+    }
+
+    .stepper-btn:hover { border-color: var(--amber); color: var(--amber); }
+
+    .stepper-val {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      min-width: 38px;
+      text-align: center;
+    }
+
+    .stepper-apply {
+      margin-left: auto;
+      font-size: 11px;
+      padding: 4px 10px;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 40px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 32px; margin-bottom: 12px; }
+    .empty-state p { font-size: 13px; margin-bottom: 16px; }
+
+    /* ── Hive Row ── */
+    .hive-row {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .hive-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .hive-status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .hive-item {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .hive-item-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .hive-item-val {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      font-weight: 400;
+    }
+
+    /* Hive connect form */
+    .connect-form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    input[type=text], input[type=password], input[type=number] {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 8px 12px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: var(--amber); }
+
+    /* ── Activity Log ── */
+    .log-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .log-card::-webkit-scrollbar { width: 4px; }
+    .log-card::-webkit-scrollbar-track { background: transparent; }
+    .log-card::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .log-entry {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 6px 0;
+      border-bottom: 1px solid #1f1f22;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      animation: log-in 0.3s ease;
+    }
+
+    @keyframes log-in {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .log-time { color: var(--muted); flex-shrink: 0; }
+    .log-msg  { color: var(--text); }
+    .log-entry.error .log-msg { color: var(--red); }
+    .log-entry.warn  .log-msg { color: #fbbf24; }
+
+    /* ── Settings Panel ── */
+    .settings-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .setting-item label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+
+    .toggle-row {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .toggle-label { font-size: 13px; font-weight: 600; }
+    .toggle-desc  { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    .toggle {
+      width: 40px;
+      height: 22px;
+      border-radius: 11px;
+      background: var(--border);
+      cursor: pointer;
+      position: relative;
+      border: none;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+
+    .toggle.on { background: var(--amber); }
+
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: white;
+      transition: transform 0.2s;
+    }
+
+    .toggle.on::after { transform: translateX(18px); }
+
+    /* ── Footer ── */
+    footer {
+      padding: 14px 32px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+    }
+
+    .footer-text {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .auto-badge {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    .auto-badge.on  { background: #f59e0b22; color: var(--amber); border: 1px solid var(--amber-dim); }
+    .auto-badge.off { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      box-shadow: 0 8px 32px #00000066;
+      transform: translateY(20px);
+      opacity: 0;
+      transition: all 0.25s;
+      z-index: 100;
+      max-width: 320px;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.success { border-color: var(--green); color: var(--green); }
+    #toast.error   { border-color: var(--red);   color: var(--red); }
+
+    /* ── Responsive ── */
+    @media (max-width: 900px) {
+      .status-row { grid-template-columns: 1fr 1fr; }
+      .hive-row   { grid-template-columns: 1fr; }
+      main { padding: 20px 16px; }
+      header { padding: 16px; }
+    }
+
+    @media (max-width: 580px) {
+      .status-row { grid-template-columns: 1fr; }
+      .settings-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+<div class="app">
+
+  <!-- ── Header ── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🔥</div>
+      <div>
+        <h1>HeatSync</h1>
+        <span>Smart Heating Control</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div class="poll-badge" id="pollBadge">last poll: <span id="lastPoll">—</span></div>
+      <button class="btn" onclick="openSettings()">⚙ Settings</button>
+    </div>
+  </header>
+
+  <!-- ── Main ── -->
+  <main>
+
+    <!-- Status Row -->
+    <div class="status-row">
+
+      <div class="stat-card" id="boilerCard">
+        <div class="stat-label">Boiler</div>
+        <div class="stat-value amber" id="boilerStatus">—</div>
+        <div class="stat-sub" id="boilerSub">Waiting for data…</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-label">Hive Thermostat</div>
+        <div class="stat-value" id="hiveTempDisplay">—</div>
+        <div class="stat-sub" id="hiveSub">
+          <span class="status-dot" id="hiveDot"></span><span id="hiveSubText">Not connected</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-label">Active Valves</div>
+        <div class="stat-value green" id="activeValveCount">0</div>
+        <div class="stat-sub" id="valveSub">of <span id="totalValves">0</span> calling for heat</div>
+      </div>
+
+    </div>
+
+    <!-- Hive + Log Row -->
+    <div class="hive-row">
+
+      <!-- Hive Panel -->
+      <div class="hive-card">
+        <div class="section-header">
+          <span class="section-title">Hive Connection</span>
+          <button class="btn" id="hiveDiscoverBtn" onclick="connectHive()" style="font-size:12px;padding:5px 12px;">Connect</button>
+        </div>
+
+        <div id="hiveConnectForm">
+          <div class="connect-form">
+            <div class="form-row">
+              <input type="text" id="hiveUser" placeholder="Hive email" autocomplete="username" />
+            </div>
+            <div class="form-row">
+              <input type="password" id="hivePass" placeholder="Hive password" autocomplete="current-password" />
+              <button class="btn primary" onclick="connectHive()">Connect</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="hiveConnected" style="display:none;">
+          <div class="hive-status-grid">
+            <div class="hive-item">
+              <div class="hive-item-label">Current Temp</div>
+              <div class="hive-item-val" id="hiveCurrentTemp">—</div>
+            </div>
+            <div class="hive-item">
+              <div class="hive-item-label">Target Temp</div>
+              <div class="hive-item-val" id="hiveTargetTemp">—</div>
+            </div>
+            <div class="hive-item">
+              <div class="hive-item-label">Mode</div>
+              <div class="hive-item-val" id="hiveMode" style="font-size:14px;">—</div>
+            </div>
+            <div class="hive-item">
+              <div class="hive-item-label">Status</div>
+              <div class="hive-item-val" id="hiveRunning" style="font-size:14px;">—</div>
+            </div>
+          </div>
+          <div style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button class="btn primary" onclick="manualBoost('on')">🔥 Boost Now</button>
+            <button class="btn danger" onclick="manualBoost('off')">Cancel Boost</button>
+            <span id="boostStatus" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-left:4px;"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Log -->
+      <div>
+        <div class="section-header">
+          <span class="section-title">Activity Log</span>
+        </div>
+        <div class="log-card" id="logContainer">
+          <div class="log-entry">
+            <span class="log-time">--:--:--</span>
+            <span class="log-msg">Waiting for first poll…</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- Kasa Valves -->
+    <div>
+      <div class="section-header">
+        <span class="section-title">Kasa Radiator Valves</span>
+      </div>
+
+      <div class="hive-card" style="margin-bottom:16px;">
+        <div class="section-header">
+          <span class="section-title">TP-Link Account</span>
+          <span style="font-size:11px;color:var(--muted);">Same login as the Kasa app</span>
+        </div>
+        <div class="connect-form">
+          <div class="form-row">
+            <input type="text" id="kasaUser" placeholder="TP-Link email" autocomplete="username" />
+          </div>
+          <div class="form-row">
+            <input type="password" id="kasaPass" placeholder="TP-Link password" autocomplete="current-password" />
+          </div>
+          <div class="form-row">
+            <input type="text" id="kasaHubIp" placeholder="Hub IP (e.g. 192.168.0.178)" value="192.168.0.178" />
+            <button class="btn primary" onclick="connectKasa()">Connect</button>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:10px;">
+          Tries local connection first, falls back to cloud. Hub IP found in your router's device list.
+        </div>
+      </div>
+
+      <div class="valve-grid" id="valveGrid">
+        <div class="empty-state">
+          <div class="icon">📡</div>
+          <p>Enter your TP-Link credentials above and click Connect.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings (hidden until opened) -->
+    <div id="settingsPanel" style="display:none;">
+      <div class="settings-card">
+        <div class="section-header">
+          <span class="section-title">Coordination Settings</span>
+          <button class="btn" onclick="saveSettings()">Save</button>
+        </div>
+        <div class="settings-grid">
+
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">Auto Mode</div>
+              <div class="toggle-desc">Automatically control boiler based on valve demand</div>
+            </div>
+            <button class="toggle" id="autoToggle" onclick="toggleAuto()"></button>
+          </div>
+
+          <div class="setting-item">
+            <label>Poll Interval (seconds)</label>
+            <input type="number" id="setPollInterval" min="10" max="300" step="5" />
+          </div>
+
+          <div class="setting-item">
+            <label>Hysteresis (°C)</label>
+            <input type="number" id="setHysteresis" min="0.1" max="3" step="0.1" />
+          </div>
+
+          <div class="setting-item">
+            <label>Boost Temp (°C)</label>
+            <input type="number" id="setBoostTemp" min="15" max="32" step="0.5" />
+          </div>
+
+          <div class="setting-item">
+            <label>Boost Duration (minutes)</label>
+            <input type="number" id="setBoostDuration" min="10" max="120" step="5" />
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ── Footer ── -->
+  <footer>
+    <div class="footer-text">HeatSync v1.0 — running on localhost:5000</div>
+    <div class="auto-badge" id="autoBadge">AUTO OFF</div>
+  </footer>
+
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+
+<script>
+// ──────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────
+let appSettings = {};
+let valveSteppers = {};  // alias -> pending target temp
+let settingsOpen = false;
+
+// ──────────────────────────────────────────────
+// Toast
+// ──────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.className = '', 3000);
+}
+
+// ──────────────────────────────────────────────
+// Poll /api/status
+// ──────────────────────────────────────────────
+async function poll() {
+  try {
+    const res = await fetch('/api/status');
+    if (!res.ok) throw new Error('Bad response');
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('lastPoll').textContent = 'error';
+  }
+}
+
+function render(data) {
+  // Last poll
+  const lp = data.last_poll || '—';
+  document.getElementById('lastPoll').textContent = lp;
+
+  // Settings cache
+  appSettings = data.settings || {};
+
+  // ── Boiler card ──
+  const boilerCard = document.getElementById('boilerCard');
+  const boilerStatus = document.getElementById('boilerStatus');
+  const boilerSub = document.getElementById('boilerSub');
+  const active = data.boiler_active;
+  boilerCard.className = active ? 'stat-card boiler-on' : 'stat-card';
+  boilerStatus.textContent = active ? 'FIRING' : 'IDLE';
+  boilerStatus.style.color = active ? 'var(--amber)' : 'var(--muted)';
+  boilerSub.textContent = active ? '🔥 Boiler is heating' : 'Standing by';
+
+  // ── Auto badge ──
+  const ab = document.getElementById('autoBadge');
+  ab.className = appSettings.auto_mode ? 'auto-badge on' : 'auto-badge off';
+  ab.textContent = appSettings.auto_mode ? '⚡ AUTO ON' : 'AUTO OFF';
+
+  // ── Hive ──
+  const hive = data.hive || {};
+  if (hive.connected) {
+    document.getElementById('hiveConnectForm').style.display = 'none';
+    document.getElementById('hiveConnected').style.display = '';
+    document.getElementById('hiveCurrentTemp').textContent = hive.current_temp != null ? `${hive.current_temp}°C` : '—';
+    document.getElementById('hiveTargetTemp').textContent = hive.target_temp != null ? `${hive.target_temp}°C` : '—';
+    document.getElementById('hiveMode').textContent = hive.mode || '—';
+    document.getElementById('hiveRunning').innerHTML = hive.heating
+      ? '<span style="color:var(--amber)">● HEATING</span>'
+      : '<span style="color:var(--muted)">○ IDLE</span>';
+    document.getElementById('hiveTempDisplay').textContent = hive.current_temp != null ? `${hive.current_temp}°` : '—';
+    document.getElementById('hiveDot').className = 'status-dot active';
+    document.getElementById('hiveSubText').textContent = 'Connected';
+  } else {
+    document.getElementById('hiveTempDisplay').textContent = '—';
+    document.getElementById('hiveDot').className = 'status-dot error';
+    document.getElementById('hiveSubText').textContent = 'Not connected';
+  }
+
+  // ── Valves ──
+  const devices = data.kasa_devices || {};
+  const aliases = Object.keys(devices);
+  const calling = aliases.filter(a => devices[a].heating && devices[a].online);
+  document.getElementById('activeValveCount').textContent = calling.length;
+  document.getElementById('totalValves').textContent = aliases.length;
+
+  if (aliases.length === 0) {
+    document.getElementById('valveGrid').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">📡</div>
+        <p>No Kasa devices found yet.</p>
+        <button class="btn primary" onclick="discoverKasa()">Discover Now</button>
+      </div>`;
+  } else {
+    renderValves(devices);
+  }
+
+  // ── Logs ──
+  renderLogs(data.logs || []);
+
+  // ── Settings panel ──
+  if (settingsOpen) populateSettings(data.settings);
+}
+
+// ──────────────────────────────────────────────
+// Valve Cards
+// ──────────────────────────────────────────────
+function renderValves(devices) {
+  const grid = document.getElementById('valveGrid');
+  const aliases = Object.keys(devices);
+
+  aliases.forEach(alias => {
+    const d = devices[alias];
+    const id = `valve_${CSS.escape(alias)}`;
+
+    // Init stepper value if not set
+    if (valveSteppers[alias] == null) {
+      valveSteppers[alias] = d.target_temp ?? 20;
+    }
+
+    const pct = progressPct(d.current_temp, d.target_temp);
+    const warm = d.heating;
+
+    const html = `
+      <div class="valve-card ${d.heating ? 'heating' : ''} ${!d.online ? 'offline' : ''}" id="${id}">
+        <div class="valve-card-header">
+          <div>
+            <div class="valve-name">${escHtml(alias)}</div>
+            <div class="valve-ip">${escHtml(d.ip || '')}</div>
+          </div>
+          ${d.heating ? '<span class="heating-badge">HEATING</span>' : ''}
+          ${!d.online ? '<span class="heating-badge" style="color:var(--red);border-color:#7f1d1d;background:#7f1d1d22">OFFLINE</span>' : ''}
+        </div>
+
+        <div class="temp-ring-wrap">
+          <div class="temp-ring">
+            <svg viewBox="0 0 64 64">
+              <circle class="ring-bg" cx="32" cy="32" r="27"/>
+              <circle class="ring-fill ${warm ? 'warm' : 'cold'}" cx="32" cy="32" r="27"
+                stroke-dasharray="${2 * Math.PI * 27}"
+                stroke-dashoffset="${2 * Math.PI * 27 * (1 - pct)}"
+              />
+            </svg>
+            <div class="temp-ring-center">
+              <span class="temp-current">${d.current_temp != null ? d.current_temp.toFixed(1) : '—'}</span>
+              <span class="temp-unit">°C</span>
+            </div>
+          </div>
+          <div class="temp-info">
+            <div class="temp-label">Current</div>
+            <div class="temp-label" style="margin-top:8px;">Target</div>
+            <div class="temp-target" style="color:${warm ? 'var(--amber)' : 'var(--blue)'}">
+              ${d.target_temp != null ? d.target_temp.toFixed(1) : '—'}°
+            </div>
+          </div>
+        </div>
+
+        <div class="temp-stepper">
+          <button class="stepper-btn" onclick="stepTemp('${escAttr(alias)}', -0.5)">−</button>
+          <span class="stepper-val" id="step_${escAttr(alias)}">${valveSteppers[alias].toFixed(1)}°</span>
+          <button class="stepper-btn" onclick="stepTemp('${escAttr(alias)}', 0.5)">+</button>
+          <button class="btn stepper-apply" onclick="applyTemp('${escAttr(alias)}')">Set</button>
+        </div>
+      </div>`;
+
+    // Upsert card
+    let existing = document.getElementById(id);
+    if (!existing) {
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      grid.appendChild(div.firstElementChild);
+    } else {
+      existing.outerHTML = html;
+    }
+  });
+}
+
+function progressPct(current, target) {
+  if (current == null || target == null) return 0;
+  const min = 10, max = 30;
+  return Math.min(Math.max((current - min) / (max - min), 0), 1);
+}
+
+function stepTemp(alias, delta) {
+  valveSteppers[alias] = Math.min(30, Math.max(5, (valveSteppers[alias] ?? 20) + delta));
+  const el = document.getElementById(`step_${alias}`);
+  if (el) el.textContent = valveSteppers[alias].toFixed(1) + '°';
+}
+
+async function applyTemp(alias) {
+  const temp = valveSteppers[alias];
+  if (temp == null) return;
+  try {
+    const r = await fetch(`/api/kasa/${encodeURIComponent(alias)}/temperature`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ temperature: temp }),
+    });
+    const j = await r.json();
+    if (j.success) toast(`${alias} set to ${temp.toFixed(1)}°C`);
+    else toast(j.error || 'Failed to set temperature', 'error');
+  } catch(e) { toast('Request failed', 'error'); }
+}
+
+// ──────────────────────────────────────────────
+// Logs
+// ──────────────────────────────────────────────
+function renderLogs(logs) {
+  const c = document.getElementById('logContainer');
+  if (!logs.length) return;
+  c.innerHTML = logs.map(l => `
+    <div class="log-entry ${l.level === 'error' ? 'error' : ''}">
+      <span class="log-time">${l.time}</span>
+      <span class="log-msg">${escHtml(l.message)}</span>
+    </div>`).join('');
+}
+
+// ──────────────────────────────────────────────
+// Hive
+// ──────────────────────────────────────────────
+async function connectHive() {
+  const user = document.getElementById('hiveUser')?.value?.trim();
+  const pass = document.getElementById('hivePass')?.value;
+  if (!user || !pass) { toast('Enter Hive email and password', 'error'); return; }
+
+  const btn = document.getElementById('hiveDiscoverBtn');
+  btn.disabled = true; btn.textContent = 'Connecting…';
+  try {
+    const r = await fetch('/api/hive/connect', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ username: user, password: pass }),
+    });
+    const j = await r.json();
+    if (j.success) { toast('Hive connected ✓'); await poll(); }
+    else toast(j.error || 'Hive connection failed', 'error');
+  } catch(e) { toast('Request failed', 'error'); }
+  btn.disabled = false; btn.textContent = 'Connect';
+}
+
+async function manualBoost(action) {
+  try {
+    const r = await fetch('/api/hive/boost', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ action }),
+    });
+    const j = await r.json();
+    const el = document.getElementById('boostStatus');
+    if (j.success) {
+      toast(action === 'on' ? 'Boost activated 🔥' : 'Boost cancelled');
+      if (el) el.textContent = action === 'on' ? 'Boost active' : 'Schedule restored';
+    } else {
+      toast(j.error || 'Failed', 'error');
+    }
+  } catch(e) { toast('Request failed', 'error'); }
+}
+
+// ──────────────────────────────────────────────
+// Kasa Connect
+// ──────────────────────────────────────────────
+async function connectKasa() {
+  const user = document.getElementById('kasaUser')?.value?.trim();
+  const pass = document.getElementById('kasaPass')?.value;
+  const hubIp = document.getElementById('kasaHubIp')?.value?.trim();
+
+  if (!user || !pass) { toast('Enter your TP-Link email and password', 'error'); return; }
+
+  toast('Connecting to Kasa...');
+  try {
+    const r = await fetch('/api/kasa/credentials', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass, hub_ip: hubIp }),
+    });
+    const j = await r.json();
+    if (j.success) {
+      const method = j.method === 'local' ? 'local network' : 'cloud';
+      toast(`Connected via ${method} — found ${j.devices.length} valve(s)`);
+      await poll();
+    } else {
+      toast(j.error || 'Connection failed', 'error');
+    }
+  } catch(e) { toast('Request failed', 'error'); }
+}
+
+async function discoverKasa() { await connectKasa(); }
+
+// ──────────────────────────────────────────────
+// Settings
+// ──────────────────────────────────────────────
+function openSettings() {
+  settingsOpen = !settingsOpen;
+  const panel = document.getElementById('settingsPanel');
+  panel.style.display = settingsOpen ? '' : 'none';
+  if (settingsOpen) populateSettings(appSettings);
+}
+
+function populateSettings(s) {
+  if (!s) return;
+  document.getElementById('setPollInterval').value = s.poll_interval ?? 60;
+  document.getElementById('setHysteresis').value   = s.hysteresis ?? 0.5;
+  document.getElementById('setBoostTemp').value    = s.boost_temp ?? 20;
+  document.getElementById('setBoostDuration').value= s.boost_duration ?? 60;
+  const tog = document.getElementById('autoToggle');
+  tog.className = s.auto_mode ? 'toggle on' : 'toggle';
+}
+
+function toggleAuto() {
+  const tog = document.getElementById('autoToggle');
+  tog.className = tog.className.includes('on') ? 'toggle' : 'toggle on';
+}
+
+async function saveSettings() {
+  const tog = document.getElementById('autoToggle');
+  const body = {
+    poll_interval:  parseFloat(document.getElementById('setPollInterval').value),
+    hysteresis:     parseFloat(document.getElementById('setHysteresis').value),
+    boost_temp:     parseFloat(document.getElementById('setBoostTemp').value),
+    boost_duration: parseFloat(document.getElementById('setBoostDuration').value),
+    auto_mode:      tog.className.includes('on'),
+  };
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (j.success) { toast('Settings saved'); appSettings = j.settings; }
+    else toast('Failed to save settings', 'error');
+  } catch(e) { toast('Request failed', 'error'); }
+}
+
+// ──────────────────────────────────────────────
+// Utils
+// ──────────────────────────────────────────────
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return escHtml(s); }
+
+// ──────────────────────────────────────────────
+// Boot
+// ──────────────────────────────────────────────
+poll();
+setInterval(poll, 15000);  // refresh UI every 15s (backend polls at its own interval)
+</script>
+</body>
+</html>
