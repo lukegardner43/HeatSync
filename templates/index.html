@@ -704,7 +704,9 @@
             <div class="form-row">
               <input type="password" id="hivePass" placeholder="Hive password" autocomplete="current-password" />
               <button class="btn primary" onclick="connectHive()">Connect</button>
+              <button class="btn" id="hiveForgetBtn" onclick="forgetCredentials('hive')" style="display:none;font-size:11px;padding:4px 10px;color:var(--muted);">Forget</button>
             </div>
+            <div id="hiveSavedNote" style="display:none;font-size:11px;color:var(--muted);margin-top:6px;">Credentials saved — click Connect to reconnect</div>
           </div>
         </div>
 
@@ -772,7 +774,9 @@
           <div class="form-row">
             <input type="text" id="kasaHubIp" placeholder="Hub IP (e.g. 192.168.0.178)" value="192.168.0.178" />
             <button class="btn primary" onclick="connectKasa()">Connect</button>
+            <button class="btn" id="kasaForgetBtn" onclick="forgetCredentials('kasa')" style="display:none;font-size:11px;padding:4px 10px;color:var(--muted);">Forget</button>
           </div>
+          <div id="kasaSavedNote" style="display:none;font-size:11px;color:var(--muted);margin-top:6px;">Credentials saved — click Connect to reconnect</div>
         </div>
         <div style="font-size:11px;color:var(--muted);margin-top:10px;">
           Tries local connection first, falls back to cloud. Hub IP found in your router's device list.
@@ -1182,8 +1186,69 @@ function escHtml(s) {
 function escAttr(s) { return escHtml(s); }
 
 // ──────────────────────────────────────────────
+// Saved Credentials
+// ──────────────────────────────────────────────
+async function loadSavedCredentials() {
+  try {
+    const r = await fetch('/api/saved-credentials');
+    const saved = await r.json();
+
+    const hive = saved.hive || {};
+    if (hive.username) {
+      document.getElementById('hiveUser').value = hive.username;
+    }
+    if (hive.has_password) {
+      document.getElementById('hivePass').placeholder = 'Password saved';
+      document.getElementById('hiveForgetBtn').style.display = '';
+      document.getElementById('hiveSavedNote').style.display = '';
+    }
+
+    const kasa = saved.kasa || {};
+    if (kasa.username) {
+      document.getElementById('kasaUser').value = kasa.username;
+    }
+    if (kasa.hub_ip) {
+      document.getElementById('kasaHubIp').value = kasa.hub_ip;
+    }
+    if (kasa.has_password) {
+      document.getElementById('kasaPass').placeholder = 'Password saved';
+      document.getElementById('kasaForgetBtn').style.display = '';
+      document.getElementById('kasaSavedNote').style.display = '';
+    }
+  } catch(e) {}
+}
+
+async function forgetCredentials(target) {
+  try {
+    const r = await fetch('/api/credentials/forget', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ target }),
+    });
+    const j = await r.json();
+    if (!j.success) return;
+    toast('Saved credentials cleared');
+    if (target === 'hive' || target === 'all') {
+      document.getElementById('hiveUser').value = '';
+      document.getElementById('hivePass').value = '';
+      document.getElementById('hivePass').placeholder = 'Hive password';
+      document.getElementById('hiveForgetBtn').style.display = 'none';
+      document.getElementById('hiveSavedNote').style.display = 'none';
+    }
+    if (target === 'kasa' || target === 'all') {
+      document.getElementById('kasaUser').value = '';
+      document.getElementById('kasaPass').value = '';
+      document.getElementById('kasaPass').placeholder = 'TP-Link password';
+      document.getElementById('kasaForgetBtn').style.display = 'none';
+      document.getElementById('kasaSavedNote').style.display = 'none';
+    }
+  } catch(e) { toast('Failed to clear credentials', 'error'); }
+}
+
+// ──────────────────────────────────────────────
 // Boot
 // ──────────────────────────────────────────────
+loadSavedCredentials();
 poll();
 setInterval(poll, 15000);  // refresh UI every 15s (backend polls at its own interval)
 </script>
