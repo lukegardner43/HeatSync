@@ -14,6 +14,7 @@ import asyncio
 import threading
 import time
 import logging
+import json
 from datetime import datetime
 
 # --- Optional imports (graceful fallback for development) ---
@@ -40,6 +41,22 @@ _BASE = _os.path.dirname(_os.path.abspath(__file__))
 app = Flask(__name__, template_folder=_os.path.join(_BASE, "templates"))
 CORS(app)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+CONFIG_FILE = _os.path.join(_BASE, "config.json")
+
+def _load_config():
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _save_config(cfg):
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        logging.error(f"Failed to save config: {e}")
 
 # ──────────────────────────────────────────────
 # Global State
@@ -70,7 +87,7 @@ settings = {
 # Internal Hive session and Kasa device cache
 hive_session = None
 kasa_cache = {}       # alias -> kasa device object
-kasa_credentials = {"username": None, "password": None}  # TP-Link account credentials
+kasa_credentials = {"username": None, "password": None, "hub_ip": "192.168.0.178"}  # TP-Link account credentials
 
 # ──────────────────────────────────────────────
 # Logging Helper
@@ -810,6 +827,9 @@ def hive_connect():
         return jsonify({"success": False, "error": "username and password required"}), 400
     try:
         connect_hive(data["username"], data["password"])
+        cfg = _load_config()
+        cfg["hive"] = {"username": data["username"], "password": data["password"]}
+        _save_config(cfg)
         return jsonify({"success": True})
     except Exception as exc:
         import traceback
@@ -847,6 +867,7 @@ def kasa_set_credentials():
 
     kasa_credentials["username"] = username
     kasa_credentials["password"] = password
+    kasa_credentials["hub_ip"] = hub_ip
 
     # Try local first
     log(f"KASA_LOCAL_AVAILABLE={KASA_LOCAL_AVAILABLE}, SmartHub={'available' if SmartHub else 'not available'}, hub_ip={hub_ip}")
@@ -854,6 +875,9 @@ def kasa_set_credentials():
         try:
             aliases = _run_async(_connect_kasa_local(hub_ip, username, password))
             log(f"Kasa local connected — {len(aliases)} valve(s) found")
+            cfg = _load_config()
+            cfg["kasa"] = {"username": username, "password": password, "hub_ip": hub_ip}
+            _save_config(cfg)
             return jsonify({"success": True, "devices": aliases, "method": "local"})
         except Exception as exc:
             log(f"Local connection failed: {exc} — trying cloud...", "error")
@@ -862,6 +886,9 @@ def kasa_set_credentials():
     try:
         aliases = connect_kasa_cloud(username, password)
         log(f"Kasa cloud connected — {len(aliases)} valve(s) found")
+        cfg = _load_config()
+        cfg["kasa"] = {"username": username, "password": password, "hub_ip": hub_ip}
+        _save_config(cfg)
         return jsonify({"success": True, "devices": aliases, "method": "cloud"})
     except Exception as exc:
         import traceback
@@ -912,6 +939,38 @@ def update_settings():
     return jsonify({"success": True, "settings": settings})
 
 
+@app.route("/api/saved-credentials", methods=["GET"])
+def get_saved_credentials():
+    cfg = _load_config()
+    hive_cfg = cfg.get("hive", {})
+    kasa_cfg = cfg.get("kasa", {})
+    return jsonify({
+        "hive": {
+            "username": hive_cfg.get("username"),
+            "has_password": bool(hive_cfg.get("password")),
+        },
+        "kasa": {
+            "username": kasa_cfg.get("username"),
+            "hub_ip": kasa_cfg.get("hub_ip", "192.168.0.178"),
+            "has_password": bool(kasa_cfg.get("password")),
+        },
+    })
+
+
+@app.route("/api/credentials/forget", methods=["POST"])
+def forget_credentials():
+    data = request.get_json() or {}
+    target = data.get("target", "all")
+    cfg = _load_config()
+    if target in ("hive", "all"):
+        cfg.pop("hive", None)
+    if target in ("kasa", "all"):
+        cfg.pop("kasa", None)
+    _save_config(cfg)
+    log(f"Saved credentials cleared ({target})")
+    return jsonify({"success": True})
+
+
 # ──────────────────────────────────────────────
 # Entry Point
 # ──────────────────────────────────────────────
@@ -940,5 +999,41 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nHeatSync starting (mDNS unavailable: {e})")
         print("Access via http://localhost:5000\n")
+
+    # ── Auto-connect from saved credentials ──
+    _startup_cfg = _load_config()
+
+    _hive_saved = _startup_cfg.get("hive", {})
+    if _hive_saved.get("username") and _hive_saved.get("password"):
+        print(f"Auto-connecting Hive as {_hive_saved['username']}...")
+        try:
+            connect_hive(_hive_saved["username"], _hive_saved["password"])
+            print("Hive auto-connected successfully")
+        except Exception as _e:
+            print(f"Hive auto-connect failed: {_e}")
+
+    _kasa_saved = _startup_cfg.get("kasa", {})
+    if _kasa_saved.get("username") and _kasa_saved.get("password"):
+        _ku = _kasa_saved["username"]
+        _kp = _kasa_saved["password"]
+        _ki = _kasa_saved.get("hub_ip", "192.168.0.178")
+        kasa_credentials["username"] = _ku
+        kasa_credentials["password"] = _kp
+        kasa_credentials["hub_ip"] = _ki
+        print(f"Auto-connecting Kasa as {_ku}...")
+        _kasa_connected = False
+        if KASA_LOCAL_AVAILABLE and _ki:
+            try:
+                _aliases = _run_async(_connect_kasa_local(_ki, _ku, _kp))
+                print(f"Kasa auto-connected (local) — {len(_aliases)} valve(s)")
+                _kasa_connected = True
+            except Exception as _e:
+                print(f"Kasa local auto-connect failed: {_e} — trying cloud...")
+        if not _kasa_connected:
+            try:
+                _aliases = connect_kasa_cloud(_ku, _kp)
+                print(f"Kasa auto-connected (cloud) — {len(_aliases)} valve(s)")
+            except Exception as _e:
+                print(f"Kasa auto-connect failed: {_e}")
 
     app.run(host="0.0.0.0", port=5000, debug=False)
