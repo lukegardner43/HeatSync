@@ -22,8 +22,10 @@ the boiler — without touching your Hive schedule.
 Open **Command Prompt** or **PowerShell** and run:
 
 ```bat
-:: 1. Enter the project folder
-cd C:\path\to\heating-app
+:: 1. Get the code and enter the project folder
+::    (clone rather than downloading a ZIP — this enables in-app updates)
+git clone https://github.com/lukegardner43/HeatSync.git
+cd HeatSync
 
 :: 2. Create a virtual environment
 python -m venv venv
@@ -83,6 +85,27 @@ The **Summer Mode** toggle in Settings pauses boiler coordination without discon
 The current season is shown as a badge in the header, and the setting is saved to
 `config.json` — so it survives a restart and the Windows startup task won't quietly
 revert you to Winter in mid-July.
+
+---
+
+## Updates
+
+**Settings → Software** shows the running version and checks GitHub for a newer one.
+If an update is available, **Install update** fast-forwards this folder to the latest
+commit on `main`, then **Restart now** relaunches the app to apply it.
+
+Nothing happens on its own — HeatSync never downloads or installs anything unless you
+click it. The update is deliberately restrictive:
+
+- Only ever fast-forwards to a commit already on this repo's `main` — it cannot merge,
+  rebase, or pull from anywhere else.
+- Refuses if you have local edits to the files, so your changes are never clobbered.
+- Refuses if your copy has diverged from GitHub, leaving you to resolve it manually.
+- Cancels any active boost before restarting, so the boiler falls back to your Hive
+  schedule rather than firing unattended across the restart.
+
+This requires HeatSync to have been installed with `git clone`. If you downloaded a ZIP,
+the version check still works but updating must be done by re-downloading the files.
 
 ---
 

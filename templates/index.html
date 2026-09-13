@@ -838,13 +838,31 @@
 
         </div>
       </div>
+
+      <div class="settings-card" style="margin-top:14px;">
+        <div class="section-header">
+          <span class="section-title">Software</span>
+          <button class="btn" id="checkUpdateBtn" onclick="checkForUpdate()">Check for updates</button>
+        </div>
+        <div style="font-size:13px;">
+          <div>Version <span id="verCurrent" style="color:var(--muted);">—</span></div>
+          <div id="verStatus" style="margin-top:8px;font-size:12px;color:var(--muted);">
+            Checks GitHub for a newer version. Nothing is downloaded or installed
+            unless you choose to.
+          </div>
+          <div id="verActions" style="display:none;margin-top:12px;gap:8px;">
+            <button class="btn primary" id="updateBtn" onclick="applyUpdate()">Install update</button>
+            <button class="btn" id="restartBtn" onclick="restartApp()" style="display:none;">Restart now</button>
+          </div>
+        </div>
+      </div>
     </div>
 
   </main>
 
   <!-- ── Footer ── -->
   <footer>
-    <div class="footer-text">HeatSync v1.0 — running on localhost:5000</div>
+    <div class="footer-text">HeatSync v1.1 — running on localhost:5000</div>
     <div class="auto-badge" id="autoBadge">AUTO OFF</div>
     <div class="auto-badge" id="seasonBadge">❄️ WINTER</div>
   </footer>
@@ -1153,7 +1171,7 @@ function openSettings() {
   settingsOpen = !settingsOpen;
   const panel = document.getElementById('settingsPanel');
   panel.style.display = settingsOpen ? '' : 'none';
-  if (settingsOpen) populateSettings(appSettings);
+  if (settingsOpen) { populateSettings(appSettings); checkForUpdate(); }
 }
 
 function populateSettings(s) {
@@ -1199,6 +1217,95 @@ async function saveSettings() {
     if (j.success) { toast('Settings saved'); appSettings = j.settings; }
     else toast('Failed to save settings', 'error');
   } catch(e) { toast('Request failed', 'error'); }
+}
+
+// ──────────────────────────────────────────────
+// Version / Update
+// ──────────────────────────────────────────────
+function showRestartPrompt() {
+  document.getElementById('verStatus').innerHTML =
+    '<span style="color:var(--amber)">Update installed — restart to apply it.</span>';
+  document.getElementById('verActions').style.display = 'flex';
+  document.getElementById('updateBtn').style.display = 'none';
+  document.getElementById('restartBtn').style.display = '';
+}
+
+async function checkForUpdate() {
+  const btn     = document.getElementById('checkUpdateBtn');
+  const status  = document.getElementById('verStatus');
+  const actions = document.getElementById('verActions');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  try {
+    const v = await (await fetch('/api/version')).json();
+    document.getElementById('verCurrent').textContent =
+      v.version + (v.local_short ? ` (${v.local_short})` : '');
+
+    actions.style.display = 'none';
+    document.getElementById('updateBtn').style.display = '';
+    document.getElementById('restartBtn').style.display = 'none';
+
+    if (v.restart_required) {
+      showRestartPrompt();
+    } else if (v.update_available && v.can_update) {
+      const L = v.latest || {};
+      status.innerHTML =
+        `<span style="color:var(--amber)">Update available — ${escHtml(L.short_sha || '')}</span>` +
+        (L.message ? `<br><span style="color:var(--muted)">${escHtml(L.message)}</span>` : '');
+      actions.style.display = 'flex';
+    } else if (v.update_available) {
+      status.textContent = v.error || 'A newer version exists, but this copy cannot update itself.';
+    } else if (v.error) {
+      status.textContent = v.error;
+    } else {
+      status.textContent = 'You are running the latest version.';
+    }
+  } catch (e) {
+    status.textContent = 'Version check failed.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check for updates';
+  }
+}
+
+async function applyUpdate() {
+  if (!confirm('Install the latest version from GitHub?\n\nHeatSync must restart to apply it.')) return;
+  const btn    = document.getElementById('updateBtn');
+  const status = document.getElementById('verStatus');
+  btn.disabled = true;
+  btn.textContent = 'Installing…';
+  try {
+    const j = await (await fetch('/api/update', { method: 'POST' })).json();
+    if (j.success && j.updated) {
+      toast(j.message);
+      showRestartPrompt();
+    } else if (j.success) {
+      toast('Already up to date');
+      status.textContent = 'You are running the latest version.';
+      document.getElementById('verActions').style.display = 'none';
+    } else {
+      toast(j.error || 'Update failed', 'error');
+      status.textContent = j.error || 'Update failed.';
+    }
+  } catch (e) {
+    toast('Update request failed', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Install update';
+  }
+}
+
+async function restartApp() {
+  if (!confirm('Restart HeatSync now?\n\nAny active boost is cancelled first, so the boiler returns to your Hive schedule.')) return;
+  document.getElementById('restartBtn').disabled = true;
+  try {
+    await fetch('/api/restart', { method: 'POST' });
+  } catch (e) {
+    // The server drops the connection as it relaunches — expected.
+  }
+  document.getElementById('verStatus').textContent = 'Restarting — reconnecting…';
+  toast('Restarting HeatSync');
+  setTimeout(() => location.reload(), 6000);
 }
 
 // ──────────────────────────────────────────────

@@ -1008,6 +1008,175 @@ def forget_credentials():
 
 
 # ──────────────────────────────────────────────
+# Version / Update
+#
+# Deliberately conservative: we only ever fast-forward this checkout to a
+# commit that is already on your own GitHub repo's main branch, we refuse if
+# there are local edits, and nothing restarts without you asking. Nothing here
+# runs automatically — a boiler controller shouldn't pull and execute new code
+# on its own.
+# ──────────────────────────────────────────────
+
+import subprocess
+
+APP_VERSION = "1.1.0"
+GITHUB_REPO = "lukegardner43/HeatSync"
+GITHUB_BRANCH = "main"
+
+restart_required = False
+
+
+def _run_git(args, timeout=60):
+    return subprocess.run(
+        ["git"] + args, cwd=_BASE, capture_output=True, text=True, timeout=timeout
+    )
+
+
+def _is_git_checkout():
+    return _os.path.isdir(_os.path.join(_BASE, ".git"))
+
+
+def _local_commit():
+    if not _is_git_checkout():
+        return None
+    try:
+        r = _run_git(["rev-parse", "HEAD"], timeout=15)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def _working_tree_dirty():
+    try:
+        r = _run_git(["status", "--porcelain"], timeout=15)
+        return bool(r.stdout.strip())
+    except Exception:
+        return False
+
+
+@app.route("/api/version")
+def get_version():
+    """Report the running version and check GitHub for a newer commit."""
+    local_sha = _local_commit()
+    info = {
+        "version": APP_VERSION,
+        "local_sha": local_sha,
+        "local_short": (local_sha or "")[:7],
+        "git_checkout": _is_git_checkout(),
+        "can_update": False,
+        "update_available": False,
+        "latest": None,
+        "restart_required": restart_required,
+        "error": None,
+    }
+
+    if not info["git_checkout"]:
+        info["error"] = "Not a git checkout — update by re-downloading the files"
+
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{GITHUB_REPO}/commits/{GITHUB_BRANCH}",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        j = resp.json()
+        latest_sha = j.get("sha")
+        commit = j.get("commit", {})
+        info["latest"] = {
+            "sha": latest_sha,
+            "short_sha": (latest_sha or "")[:7],
+            "message": (commit.get("message") or "").split("\n")[0],
+            "date": commit.get("committer", {}).get("date"),
+        }
+        if local_sha and latest_sha:
+            info["update_available"] = local_sha != latest_sha
+            info["can_update"] = info["update_available"] and info["git_checkout"]
+    except Exception as exc:
+        info["error"] = f"Could not reach GitHub: {exc}"
+
+    return jsonify(info)
+
+
+@app.route("/api/update", methods=["POST"])
+def apply_update():
+    """Fast-forward this checkout to origin/main. Never merges, never rebases."""
+    global restart_required
+
+    if not _is_git_checkout():
+        return jsonify({
+            "success": False,
+            "error": "Not a git checkout — update by re-downloading the files",
+        }), 400
+
+    if _working_tree_dirty():
+        return jsonify({
+            "success": False,
+            "error": "You have local changes to these files. Commit or discard them first.",
+        }), 409
+
+    before = _local_commit()
+
+    try:
+        fetch = _run_git(["fetch", "origin", GITHUB_BRANCH], timeout=120)
+        if fetch.returncode != 0:
+            return jsonify({"success": False, "error": f"Fetch failed: {fetch.stderr.strip()}"}), 502
+
+        merge = _run_git(["merge", "--ff-only", f"origin/{GITHUB_BRANCH}"], timeout=60)
+        if merge.returncode != 0:
+            return jsonify({
+                "success": False,
+                "error": "Cannot fast-forward — this copy has diverged from GitHub. "
+                         f"Resolve it manually: {merge.stderr.strip()}",
+            }), 409
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Update timed out"}), 504
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+    after = _local_commit()
+
+    if before == after:
+        log("Update check: already up to date")
+        return jsonify({"success": True, "updated": False, "message": "Already up to date",
+                        "sha": (after or "")[:7], "restart_required": restart_required})
+
+    restart_required = True
+    log(f"Updated {(before or '')[:7]} → {(after or '')[:7]} — restart required")
+    return jsonify({
+        "success": True,
+        "updated": True,
+        "message": f"Updated to {(after or '')[:7]}",
+        "sha": (after or "")[:7],
+        "restart_required": True,
+    })
+
+
+@app.route("/api/restart", methods=["POST"])
+def restart_app():
+    """Relaunch the app so updated code takes effect."""
+    # Don't leave the boiler boosted across a restart we initiated.
+    if state["boiler_active"]:
+        try:
+            _cancel_hive_boost()
+            state["boiler_active"] = False
+            log("Boost cancelled ahead of restart")
+        except Exception as exc:
+            log(f"Could not cancel boost before restart: {exc}", "error")
+
+    def _relaunch():
+        time.sleep(1.0)
+        try:
+            _os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as exc:
+            logging.error(f"Restart failed — start HeatSync manually: {exc}")
+
+    log("Restarting HeatSync...")
+    threading.Thread(target=_relaunch, daemon=True, name="restart").start()
+    return jsonify({"success": True, "message": "Restarting — this page will reconnect shortly"})
+
+
+# ──────────────────────────────────────────────
 # Entry Point
 # ──────────────────────────────────────────────
 
