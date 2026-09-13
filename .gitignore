@@ -1,0 +1,8 @@
+# Saved Hive / TP-Link credentials and settings — never commit these
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/

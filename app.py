@@ -82,7 +82,17 @@ settings = {
     "boost_temp": 20.0,          # temperature Hive boosts to when valves call for heat
     "boost_duration": 60,        # boost duration in minutes (refreshed each poll cycle)
     "auto_mode": True,           # enable/disable coordination
+    "season": "winter",          # "winter" = coordinate boiler, "summer" = never call for heat
 }
+
+def _restore_settings():
+    """Reload persisted settings so a restart doesn't silently revert Summer to Winter."""
+    saved = _load_config().get("settings", {})
+    for key in settings:
+        if key in saved:
+            settings[key] = saved[key]
+
+_restore_settings()
 
 # Internal Hive session and Kasa device cache
 hive_session = None
@@ -763,31 +773,43 @@ def coordination_loop():
 
             # ── Coordination logic ──
             if settings["auto_mode"] and state["hive"]["connected"]:
-                any_calling = any(
-                    d.get("heating") and d.get("online")
-                    for d in state["kasa_devices"].values()
-                )
+                if settings.get("season") == "summer":
+                    # Summer: valves stay readable/settable, but we never fire the
+                    # boiler. Release a boost we're still holding from winter.
+                    if state["boiler_active"]:
+                        try:
+                            _cancel_hive_boost()
+                            state["boiler_active"] = False
+                            log("[SUMMER] Boost cancelled — summer mode, boiler coordination paused")
+                        except Exception as exc:
+                            log(f"Failed to cancel boost for summer mode: {exc}", "error")
 
-                if any_calling:
-                    calling = [
-                        a for a, d in state["kasa_devices"].items()
-                        if d.get("heating") and d.get("online")
-                    ]
-                    try:
-                        _activate_hive_boost()
-                        if not state["boiler_active"]:
-                            log(f"[HEAT] Boost activated — {', '.join(calling)} calling for heat")
-                        state["boiler_active"] = True
-                    except Exception as exc:
-                        log(f"Failed to activate boost: {exc}", "error")
+                else:
+                    any_calling = any(
+                        d.get("heating") and d.get("online")
+                        for d in state["kasa_devices"].values()
+                    )
 
-                elif not any_calling and state["boiler_active"]:
-                    try:
-                        _cancel_hive_boost()
-                        state["boiler_active"] = False
-                        log("[IDLE] Boost cancelled — all valves satisfied, Hive back on schedule")
-                    except Exception as exc:
-                        log(f"Failed to cancel boost: {exc}", "error")
+                    if any_calling:
+                        calling = [
+                            a for a, d in state["kasa_devices"].items()
+                            if d.get("heating") and d.get("online")
+                        ]
+                        try:
+                            _activate_hive_boost()
+                            if not state["boiler_active"]:
+                                log(f"[HEAT] Boost activated — {', '.join(calling)} calling for heat")
+                            state["boiler_active"] = True
+                        except Exception as exc:
+                            log(f"Failed to activate boost: {exc}", "error")
+
+                    elif not any_calling and state["boiler_active"]:
+                        try:
+                            _cancel_hive_boost()
+                            state["boiler_active"] = False
+                            log("[IDLE] Boost cancelled — all valves satisfied, Hive back on schedule")
+                        except Exception as exc:
+                            log(f"Failed to cancel boost: {exc}", "error")
 
         except Exception as exc:
             log(f"Coordination loop error: {exc}", "error")
@@ -930,11 +952,25 @@ def get_settings():
 
 @app.route("/api/settings", methods=["POST"])
 def update_settings():
-    data = request.get_json()
-    allowed = {"poll_interval", "hysteresis", "auto_mode", "boost_temp", "boost_duration"}
+    data = request.get_json(silent=True) or {}
+    allowed = {"poll_interval", "hysteresis", "auto_mode", "boost_temp", "boost_duration", "season"}
+
+    if "season" in data and data["season"] not in ("winter", "summer"):
+        return jsonify({"success": False, "error": "season must be 'winter' or 'summer'"}), 400
+
+    previous_season = settings.get("season")
     for key in allowed:
         if key in data:
             settings[key] = data[key]
+
+    # Persist so a restart (e.g. the Windows startup task) doesn't revert Summer
+    # to Winter and fire the boiler unattended.
+    cfg = _load_config()
+    cfg["settings"] = dict(settings)
+    _save_config(cfg)
+
+    if settings.get("season") != previous_season:
+        log(f"Season set to {settings.get('season')}")
     log("Settings updated")
     return jsonify({"success": True, "settings": settings})
 
@@ -1001,39 +1037,47 @@ if __name__ == "__main__":
         print("Access via http://localhost:5000\n")
 
     # ── Auto-connect from saved credentials ──
-    _startup_cfg = _load_config()
+    # Runs in the background: Hive/Kasa logins can take tens of seconds (or hang
+    # on an unreachable hub), and doing them inline delays app.run(), making the
+    # dashboard look dead until they finish.
+    def _startup_autoconnect():
+        _startup_cfg = _load_config()
 
-    _hive_saved = _startup_cfg.get("hive", {})
-    if _hive_saved.get("username") and _hive_saved.get("password"):
-        print(f"Auto-connecting Hive as {_hive_saved['username']}...")
-        try:
-            connect_hive(_hive_saved["username"], _hive_saved["password"])
-            print("Hive auto-connected successfully")
-        except Exception as _e:
-            print(f"Hive auto-connect failed: {_e}")
+        _hive_saved = _startup_cfg.get("hive", {})
+        if _hive_saved.get("username") and _hive_saved.get("password"):
+            print(f"Auto-connecting Hive as {_hive_saved['username']}...")
+            try:
+                connect_hive(_hive_saved["username"], _hive_saved["password"])
+                print("Hive auto-connected successfully")
+            except Exception as _e:
+                print(f"Hive auto-connect failed: {_e}")
 
-    _kasa_saved = _startup_cfg.get("kasa", {})
-    if _kasa_saved.get("username") and _kasa_saved.get("password"):
-        _ku = _kasa_saved["username"]
-        _kp = _kasa_saved["password"]
-        _ki = _kasa_saved.get("hub_ip", "192.168.0.178")
-        kasa_credentials["username"] = _ku
-        kasa_credentials["password"] = _kp
-        kasa_credentials["hub_ip"] = _ki
-        print(f"Auto-connecting Kasa as {_ku}...")
-        _kasa_connected = False
-        if KASA_LOCAL_AVAILABLE and _ki:
-            try:
-                _aliases = _run_async(_connect_kasa_local(_ki, _ku, _kp))
-                print(f"Kasa auto-connected (local) — {len(_aliases)} valve(s)")
-                _kasa_connected = True
-            except Exception as _e:
-                print(f"Kasa local auto-connect failed: {_e} — trying cloud...")
-        if not _kasa_connected:
-            try:
-                _aliases = connect_kasa_cloud(_ku, _kp)
-                print(f"Kasa auto-connected (cloud) — {len(_aliases)} valve(s)")
-            except Exception as _e:
-                print(f"Kasa auto-connect failed: {_e}")
+        _kasa_saved = _startup_cfg.get("kasa", {})
+        if _kasa_saved.get("username") and _kasa_saved.get("password"):
+            _ku = _kasa_saved["username"]
+            _kp = _kasa_saved["password"]
+            _ki = _kasa_saved.get("hub_ip", "192.168.0.178")
+            kasa_credentials["username"] = _ku
+            kasa_credentials["password"] = _kp
+            kasa_credentials["hub_ip"] = _ki
+            print(f"Auto-connecting Kasa as {_ku}...")
+            _kasa_connected = False
+            if KASA_LOCAL_AVAILABLE and _ki:
+                try:
+                    _aliases = _run_async(_connect_kasa_local(_ki, _ku, _kp))
+                    print(f"Kasa auto-connected (local) — {len(_aliases)} valve(s)")
+                    _kasa_connected = True
+                except Exception as _e:
+                    print(f"Kasa local auto-connect failed: {_e} — trying cloud...")
+            if not _kasa_connected:
+                try:
+                    _aliases = connect_kasa_cloud(_ku, _kp)
+                    print(f"Kasa auto-connected (cloud) — {len(_aliases)} valve(s)")
+                except Exception as _e:
+                    print(f"Kasa auto-connect failed: {_e}")
+
+    threading.Thread(
+        target=_startup_autoconnect, daemon=True, name="startup-autoconnect"
+    ).start()
 
     app.run(host="0.0.0.0", port=5000, debug=False)

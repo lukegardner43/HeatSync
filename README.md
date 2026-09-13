@@ -69,6 +69,20 @@ Once both are connected, enable **Auto Mode** in Settings. The app will:
 | Hysteresis | 0.5°C | How far below target before calling for heat |
 | Boost Temp | 22°C | Temperature passed to Hive boost (keeps boiler firing) |
 | Boost Duration | 60 min | Boost window — refreshed every poll cycle while valves need heat |
+| Season | Winter | Winter coordinates the boiler as normal; Summer pauses it entirely |
+
+### Summer / Winter mode
+
+The **Summer Mode** toggle in Settings pauses boiler coordination without disconnecting anything:
+
+- **Winter** — normal operation, valve demand fires the Hive boost.
+- **Summer** — HeatSync never calls for heat. Hive and Kasa stay connected, valve
+  temperatures are still readable and settable, and any boost still held when you
+  switch is cancelled on the next poll so Hive returns to its schedule.
+
+The current season is shown as a badge in the header, and the setting is saved to
+`config.json` — so it survives a restart and the Windows startup task won't quietly
+revert you to Winter in mid-July.
 
 ---
 

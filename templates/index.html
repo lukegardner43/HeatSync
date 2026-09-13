@@ -808,6 +808,14 @@
             <button class="toggle" id="autoToggle" onclick="toggleAuto()"></button>
           </div>
 
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">Summer Mode</div>
+              <div class="toggle-desc">Pause boiler coordination — valves stay connected, boiler never fires</div>
+            </div>
+            <button class="toggle" id="seasonToggle" onclick="toggleSeason()"></button>
+          </div>
+
           <div class="setting-item">
             <label>Poll Interval (seconds)</label>
             <input type="number" id="setPollInterval" min="10" max="300" step="5" />
@@ -838,6 +846,7 @@
   <footer>
     <div class="footer-text">HeatSync v1.0 — running on localhost:5000</div>
     <div class="auto-badge" id="autoBadge">AUTO OFF</div>
+    <div class="auto-badge" id="seasonBadge">❄️ WINTER</div>
   </footer>
 
 </div>
@@ -901,6 +910,12 @@ function render(data) {
   const ab = document.getElementById('autoBadge');
   ab.className = appSettings.auto_mode ? 'auto-badge on' : 'auto-badge off';
   ab.textContent = appSettings.auto_mode ? '⚡ AUTO ON' : 'AUTO OFF';
+
+  // ── Season badge ──
+  const sb = document.getElementById('seasonBadge');
+  const isSummer = appSettings.season === 'summer';
+  sb.className = isSummer ? 'auto-badge off' : 'auto-badge on';
+  sb.textContent = isSummer ? '☀️ SUMMER' : '❄️ WINTER';
 
   // ── Hive ──
   const hive = data.hive || {};
@@ -1149,6 +1164,8 @@ function populateSettings(s) {
   document.getElementById('setBoostDuration').value= s.boost_duration ?? 60;
   const tog = document.getElementById('autoToggle');
   tog.className = s.auto_mode ? 'toggle on' : 'toggle';
+  const seasonTog = document.getElementById('seasonToggle');
+  seasonTog.className = s.season === 'summer' ? 'toggle on' : 'toggle';
 }
 
 function toggleAuto() {
@@ -1156,14 +1173,21 @@ function toggleAuto() {
   tog.className = tog.className.includes('on') ? 'toggle' : 'toggle on';
 }
 
+function toggleSeason() {
+  const tog = document.getElementById('seasonToggle');
+  tog.className = tog.className.includes('on') ? 'toggle' : 'toggle on';
+}
+
 async function saveSettings() {
   const tog = document.getElementById('autoToggle');
+  const seasonTog = document.getElementById('seasonToggle');
   const body = {
     poll_interval:  parseFloat(document.getElementById('setPollInterval').value),
     hysteresis:     parseFloat(document.getElementById('setHysteresis').value),
     boost_temp:     parseFloat(document.getElementById('setBoostTemp').value),
     boost_duration: parseFloat(document.getElementById('setBoostDuration').value),
     auto_mode:      tog.className.includes('on'),
+    season:         seasonTog.className.includes('on') ? 'summer' : 'winter',
   };
   try {
     const r = await fetch('/api/settings', {
