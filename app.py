@@ -15,6 +15,7 @@ import threading
 import time
 import logging
 import json
+import re
 from datetime import datetime
 
 # --- Optional imports (graceful fallback for development) ---
@@ -578,6 +579,29 @@ HIVE_HEATING_URL = "https://beekeeper.hivehome.com/1.0/nodes/heating/{id}"
 
 def _hive_headers():
     return {"Authorization": _hive_token, "Content-Type": "application/json"}
+
+
+def _hive_login_info(self):
+    """Replacement for pyhiveapi's HiveApi.getLoginInfo.
+
+    pyhiveapi reads the Cognito pool/client IDs from sso.hivehome.com by
+    string-mangling the page's first <script> into JSON. Hive now writes
+    those values as one single-quoted assignment per line, which breaks
+    that parser (JSONDecodeError). A regex copes with either format.
+    """
+    resp = requests.get(self.urls["properties"], timeout=15)
+    resp.raise_for_status()
+    values = dict(re.findall(r"window\.(\w+)\s*=\s*['\"]([^'\"]*)['\"]", resp.text))
+    pool_id = values.get("HiveSSOPoolId")
+    client_id = values.get("HiveSSOPublicCognitoClientId")
+    if not pool_id or not client_id:
+        raise RuntimeError("Couldn't read Hive login settings from sso.hivehome.com — Hive may have changed their login page")
+    return {"UPID": pool_id, "CLIID": client_id, "REGION": pool_id}
+
+
+if HIVE_AVAILABLE:
+    from pyhiveapi.api.hive_api import HiveApi as _HiveApi
+    _HiveApi.getLoginInfo = _hive_login_info
 
 
 def connect_hive(username, password):
