@@ -90,12 +90,39 @@ revert you to Winter in mid-July.
 
 ## Updates
 
+### Automatic, on start
+
+`start_heatsync.bat` checks GitHub for a newer version every time it starts HeatSync,
+installs it if there is one, then starts the app. Nothing is updated while HeatSync is
+running.
+
+- **Downloaded ZIP:** the latest files from `main` are copied over this folder.
+  `config.json`, `github_token.txt`, `venv` and `heatsync.log` are never touched, but any
+  edits you made to HeatSync's own files are overwritten.
+- **`git clone`:** runs `git pull --ff-only`, which refuses if you have local edits.
+- If anything goes wrong (no internet, GitHub down, a failed download), the current
+  version starts as normal and the reason is written to `heatsync.log`.
+
+**The repo is private**, so GitHub needs a token before it will hand over the latest
+version (a `git clone` uses your git login instead and doesn't need this):
+
+1. On GitHub go to **Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token**.
+2. Repository access: **Only select repositories** → `HeatSync`.
+3. Permissions: **Contents → Read-only**. Nothing else is needed.
+4. Paste the token into a file called `github_token.txt` in the HeatSync folder.
+
+Tokens expire, so generate a new one when `heatsync.log` says the update check failed.
+If the repo is made public, the token isn't needed.
+
+### From the web page
+
 **Settings → Software** shows the running version and checks GitHub for a newer one.
 If an update is available, **Install update** fast-forwards this folder to the latest
 commit on `main`, then **Restart now** relaunches the app to apply it.
 
-Nothing happens on its own — HeatSync never downloads or installs anything unless you
-click it. The update is deliberately restrictive:
+The running app never downloads or installs anything unless you click it. This update
+is deliberately restrictive:
 
 - Only ever fast-forwards to a commit already on this repo's `main` — it cannot merge,
   rebase, or pull from anywhere else.
@@ -104,8 +131,9 @@ click it. The update is deliberately restrictive:
 - Cancels any active boost before restarting, so the boiler falls back to your Hive
   schedule rather than firing unattended across the restart.
 
-This requires HeatSync to have been installed with `git clone`. If you downloaded a ZIP,
-the version check still works but updating must be done by re-downloading the files.
+This requires HeatSync to have been installed with `git clone`. A downloaded ZIP is
+updated by `start_heatsync.bat` instead. The version check here doesn't use
+`github_token.txt`, so it can't see the repo while it is private.
 
 ---
 
@@ -113,15 +141,8 @@ the version check still works but updating must be done by re-downloading the fi
 
 The easiest method is Task Scheduler:
 
-1. Create a file called `start_heatsync.bat` in the heating-app folder:
-
-```bat
-@echo off
-cd /d C:\path\to\heating-app
-call venv\Scripts\activate
-python app.py
-```
-
+1. Use the `start_heatsync.bat` included in the HeatSync folder — it sets up the venv on
+   first run and installs any update before starting
 2. Open **Task Scheduler** (search in Start menu)
 3. Click **Create Basic Task…**
 4. Name it `HeatSync`
