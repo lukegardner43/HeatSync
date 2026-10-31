@@ -573,6 +573,8 @@ _hive_token = None
 _hive_product_id = None
 _hive_refresh_token = None
 _hive_credentials = {"username": None, "password": None}  # stored for auto-reconnect
+_hive_retry_at = 0.0     # time.time() of the next reconnect attempt; inf = stopped
+_hive_retry_delay = 60   # seconds; doubles after each failed reconnect, up to 15 min
 
 HIVE_NODES_URL   = "https://beekeeper.hivehome.com/1.0/nodes/all"
 HIVE_HEATING_URL = "https://beekeeper.hivehome.com/1.0/nodes/heating/{id}"
@@ -599,13 +601,21 @@ def _hive_login_info(self):
     return {"UPID": pool_id, "CLIID": client_id, "REGION": pool_id}
 
 
+class HiveLoginRejected(RuntimeError):
+    """Hive turned the login down: retrying the same details can't help."""
+
+
 if HIVE_AVAILABLE:
     from pyhiveapi.api.hive_api import HiveApi as _HiveApi
+    from pyhiveapi.helper.hive_exceptions import HiveInvalidPassword, HiveInvalidUsername
     _HiveApi.getLoginInfo = _hive_login_info
+    _HIVE_REJECTIONS = (HiveLoginRejected, HiveInvalidUsername, HiveInvalidPassword)
+else:
+    _HIVE_REJECTIONS = (HiveLoginRejected,)
 
 
 def connect_hive(username, password):
-    global _hive_token, _hive_product_id, _hive_refresh_token
+    global _hive_token, _hive_product_id, _hive_refresh_token, _hive_retry_at, _hive_retry_delay
 
     log(f"Attempting Hive login for {username}...")
     _hive_credentials["username"] = username
@@ -618,7 +628,7 @@ def connect_hive(username, password):
 
         # Handle 2FA challenge if needed
         if auth_data.get("ChallengeName") == "SMS_MFA":
-            raise RuntimeError("Hive 2FA is required. Disable SMS 2FA in your Hive account settings to use HeatSync, then try again.")
+            raise HiveLoginRejected("Hive 2FA is required. Disable SMS 2FA in your Hive account settings to use HeatSync, then try again.")
 
         if "AuthenticationResult" not in auth_data:
             raise RuntimeError(f"Unexpected auth response: {list(auth_data.keys())}")
@@ -653,6 +663,8 @@ def connect_hive(username, password):
         state["hive"]["target_temp"]  = hstate.get("target")
         state["hive"]["mode"]         = hstate.get("mode", "SCHEDULE")
         state["hive"]["heating"]      = props.get("working", False)
+        _hive_retry_at = 0.0
+        _hive_retry_delay = 60
         log("Hive connected successfully")
         return True
 
@@ -660,14 +672,38 @@ def connect_hive(username, password):
         import traceback
         state["hive"]["connected"] = False
         _hive_token = None
-        log(f"Hive login failed: {exc}", "error")
+        detail = str(exc) or type(exc).__name__  # pyhiveapi's errors carry no message
+        log(f"Hive login failed: {detail}", "error")
         log(traceback.format_exc(), "error")
-        raise RuntimeError(f"Hive login failed: {exc}")
+        if isinstance(exc, _HIVE_REJECTIONS):
+            # Stop auto-reconnecting until the details are entered again: a wrong
+            # password won't start working, and with 2FA every try texts a code.
+            _hive_retry_at = float("inf")
+            raise HiveLoginRejected(f"Hive login failed: {detail}") from exc
+        raise RuntimeError(f"Hive login failed: {detail}")
+
+
+def _retry_hive_login():
+    """Log back in with the remembered details, backing off after each failure."""
+    global _hive_retry_at, _hive_retry_delay
+    if not (_hive_credentials["username"] and _hive_credentials["password"]):
+        return
+    if time.time() < _hive_retry_at:
+        return
+    try:
+        connect_hive(_hive_credentials["username"], _hive_credentials["password"])
+    except HiveLoginRejected:
+        log("Hive rejected the saved login — reconnect from the dashboard to try again", "error")
+    except Exception:
+        _hive_retry_at = time.time() + _hive_retry_delay
+        log(f"Hive reconnect failed — trying again in {_hive_retry_delay // 60} min", "error")
+        _hive_retry_delay = min(_hive_retry_delay * 2, 15 * 60)
 
 
 def _update_hive():
-    """Refresh Hive thermostat readings. Auto-reconnects on token expiry."""
+    """Refresh Hive thermostat readings. Reconnects on token expiry or a failed login."""
     if not _hive_token or not state["hive"]["connected"]:
+        _retry_hive_login()
         return
 
     try:
@@ -679,12 +715,7 @@ def _update_hive():
         if resp.status_code == 401:
             log("Hive token expired — attempting auto-reconnect...", "error")
             state["hive"]["connected"] = False
-            if _hive_credentials["username"] and _hive_credentials["password"]:
-                try:
-                    connect_hive(_hive_credentials["username"], _hive_credentials["password"])
-                    log("Hive auto-reconnected successfully")
-                except Exception as e:
-                    log(f"Hive auto-reconnect failed: {e}", "error")
+            _retry_hive_login()
             return
         resp.raise_for_status()
         nodes = resp.json()
@@ -868,10 +899,12 @@ def get_status():
 
 @app.route("/api/hive/connect", methods=["POST"])
 def hive_connect():
+    global _hive_retry_at
     data = request.get_json()
     if not data or "username" not in data or "password" not in data:
         return jsonify({"success": False, "error": "username and password required"}), 400
     try:
+        _hive_retry_at = 0.0  # logging in by hand restarts auto-reconnect if it had stopped
         connect_hive(data["username"], data["password"])
         cfg = _load_config()
         cfg["hive"] = {"username": data["username"], "password": data["password"]}
@@ -1024,6 +1057,8 @@ def forget_credentials():
     cfg = _load_config()
     if target in ("hive", "all"):
         cfg.pop("hive", None)
+        # Forgotten means forgotten: don't keep logging back in with them
+        _hive_credentials.update(username=None, password=None)
     if target in ("kasa", "all"):
         cfg.pop("kasa", None)
     _save_config(cfg)
