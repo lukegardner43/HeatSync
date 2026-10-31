@@ -97,23 +97,11 @@ installs it if there is one, then starts the app. Nothing is updated while HeatS
 running.
 
 - **Downloaded ZIP:** the latest files from `main` are copied over this folder.
-  `config.json`, `github_token.txt`, `venv` and `heatsync.log` are never touched, but any
-  edits you made to HeatSync's own files are overwritten.
+  `config.json`, `venv` and `heatsync.log` are never touched, but any edits you made to
+  HeatSync's own files are overwritten.
 - **`git clone`:** runs `git pull --ff-only`, which refuses if you have local edits.
 - If anything goes wrong (no internet, GitHub down, a failed download), the current
   version starts as normal and the reason is written to `heatsync.log`.
-
-**The repo is private**, so GitHub needs a token before it will hand over the latest
-version (a `git clone` uses your git login instead and doesn't need this):
-
-1. On GitHub go to **Settings → Developer settings → Personal access tokens →
-   Fine-grained tokens → Generate new token**.
-2. Repository access: **Only select repositories** → `HeatSync`.
-3. Permissions: **Contents → Read-only**. Nothing else is needed.
-4. Paste the token into a file called `github_token.txt` in the HeatSync folder.
-
-Tokens expire, so generate a new one when `heatsync.log` says the update check failed.
-If the repo is made public, the token isn't needed.
 
 ### From the web page
 
@@ -132,8 +120,7 @@ is deliberately restrictive:
   schedule rather than firing unattended across the restart.
 
 This requires HeatSync to have been installed with `git clone`. A downloaded ZIP is
-updated by `start_heatsync.bat` instead. The version check here doesn't use
-`github_token.txt`, so it can't see the repo while it is private.
+updated by `start_heatsync.bat` instead.
 
 ---
 

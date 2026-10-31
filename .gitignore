@@ -1,6 +1,5 @@
 # Saved Hive / TP-Link credentials and settings — never commit these
 config.json
-github_token.txt
 
 # Written locally by start_heatsync.bat / update_heatsync.ps1
 heatsync.log

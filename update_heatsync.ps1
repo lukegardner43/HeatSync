@@ -10,9 +10,8 @@ $repo   = 'lukegardner43/HeatSync'
 $branch = 'main'
 $here   = $PSScriptRoot
 $marker = Join-Path $here '.heatsync_version'
-$tokenFile = Join-Path $here 'github_token.txt'
 # Local-only files and folders an update must never touch
-$keep   = @('config.json', 'heatsync.log', '.heatsync_version', 'github_token.txt', 'venv', '.git')
+$keep   = @('config.json', 'heatsync.log', '.heatsync_version', 'venv', '.git')
 
 # The progress bar slows downloads to a crawl in Windows PowerShell 5.1
 $ProgressPreference = 'SilentlyContinue'
@@ -52,20 +51,11 @@ if (Test-Path (Join-Path $here '.git')) {
 
 # Otherwise this is a downloaded ZIP: compare against the commit we last installed
 $ErrorActionPreference = 'Stop'
-
-# A private repo needs a GitHub token with read access to its contents
-$headers = @{}
-if (Test-Path $tokenFile) { $headers['Authorization'] = 'Bearer ' + (Get-Content $tokenFile -Raw).Trim() }
-
 try {
-    $latest = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/commits/$branch" -Headers $headers -UseBasicParsing -TimeoutSec 15).sha
+    $latest = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/commits/$branch" -UseBasicParsing -TimeoutSec 15).sha
     if (-not $latest) { throw 'GitHub did not return a commit' }
 } catch {
-    $msg = $_.Exception.Message
-    if ($_.Exception.Response -and @(401, 404) -contains [int]$_.Exception.Response.StatusCode) {
-        $msg += ' - if the repo is private, put a GitHub token in github_token.txt (see README)'
-    }
-    Say "Could not check GitHub, starting current version: $msg"
+    Say "Could not check GitHub, starting current version: $($_.Exception.Message)"
     exit 0
 }
 
@@ -83,7 +73,7 @@ try {
     $zip = Join-Path $tmp 'update.zip'
     Say "Downloading update $($latest.Substring(0, 7))..."
     # Fetch the exact commit we compared against, not whatever main is by now
-    Invoke-WebRequest -Uri "https://api.github.com/repos/$repo/zipball/$latest" -Headers $headers -OutFile $zip -UseBasicParsing -TimeoutSec 120
+    Invoke-WebRequest -Uri "https://api.github.com/repos/$repo/zipball/$latest" -OutFile $zip -UseBasicParsing -TimeoutSec 120
     Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp 'files')
     $src = (Get-ChildItem (Join-Path $tmp 'files') -Directory | Select-Object -First 1).FullName
     if (-not $src -or -not (Test-Path (Join-Path $src 'app.py'))) { throw 'the download did not contain HeatSync' }
